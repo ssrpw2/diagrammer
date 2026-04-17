@@ -349,6 +349,99 @@ body {
   font-size: 11px;
   color: #7f8fa6;
 }
+
+/* ---- Mermaid modal ---- */
+#mermaid-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+#mermaid-overlay.visible {
+  display: flex;
+}
+
+#mermaid-modal {
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 8px;
+  padding: 24px;
+  width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+#mermaid-modal h3 {
+  font-size: 16px;
+  color: #c8d6e5;
+  margin: 0;
+}
+
+#mermaid-modal textarea {
+  width: 100%;
+  height: 240px;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  padding: 12px;
+  resize: vertical;
+}
+
+#mermaid-modal textarea:focus {
+  outline: none;
+  border-color: #533483;
+}
+
+#mermaid-modal .modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+#mermaid-modal button {
+  padding: 8px 18px;
+  border-radius: 4px;
+  border: 1px solid #0f3460;
+  background: #1a1a2e;
+  color: #c8d6e5;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#mermaid-modal button:hover {
+  background: #0f3460;
+}
+
+#mermaid-modal button.primary {
+  background: #533483;
+  border-color: #533483;
+}
+
+#mermaid-modal button.primary:hover {
+  background: #6b44a8;
+}
+
+#mermaid-modal .modal-hint {
+  font-size: 11px;
+  color: #7f8fa6;
+  line-height: 1.5;
+}
+
+#mermaid-error {
+  color: #e94560;
+  font-size: 12px;
+  min-height: 18px;
+}
 </style>
 </head>
 <body>
@@ -403,7 +496,27 @@ body {
     <button id="btn-save" title="Save (Ctrl+S)">Save</button>
     <button id="btn-load" title="Load (Ctrl+O)">Load</button>
     <button id="btn-export" title="Export PNG">Export PNG</button>
+    <button id="btn-mermaid" title="Import Mermaid">Import Mermaid</button>
     <button id="btn-clear" title="Clear all">Clear</button>
+  </div>
+
+  <div id="mermaid-overlay">
+    <div id="mermaid-modal">
+      <h3>Import Mermaid Flowchart</h3>
+      <textarea id="mermaid-input" spellcheck="false" placeholder="graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Process]
+    B -->|No| D[(Database)]
+    C --> E([End])"></textarea>
+      <div id="mermaid-error"></div>
+      <div class="modal-hint">
+        Supported: graph TD/LR/BT/RL. Node shapes: [rect] ([rounded]) {diamond} [(cylinder)] [/parallelogram/]. Edge labels: -->|label|
+      </div>
+      <div class="modal-buttons">
+        <button id="mermaid-cancel">Cancel</button>
+        <button id="mermaid-import" class="primary">Import</button>
+      </div>
+    </div>
   </div>
 
   <div id="canvas-container">
@@ -1227,6 +1340,300 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// ---- Mermaid import ----
+
+document.getElementById('btn-mermaid').addEventListener('click', openMermaidModal);
+document.getElementById('mermaid-cancel').addEventListener('click', closeMermaidModal);
+document.getElementById('mermaid-import').addEventListener('click', doMermaidImport);
+document.getElementById('mermaid-overlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeMermaidModal();
+});
+
+function openMermaidModal() {
+  document.getElementById('mermaid-overlay').classList.add('visible');
+  document.getElementById('mermaid-input').focus();
+  document.getElementById('mermaid-error').textContent = '';
+}
+
+function closeMermaidModal() {
+  document.getElementById('mermaid-overlay').classList.remove('visible');
+}
+
+function doMermaidImport() {
+  const input = document.getElementById('mermaid-input').value.trim();
+  const errorEl = document.getElementById('mermaid-error');
+  errorEl.textContent = '';
+
+  try {
+    const result = parseMermaid(input);
+    clearAll();
+    layoutAndCreate(result.nodes, result.edges, result.direction);
+    closeMermaidModal();
+  } catch (e) {
+    errorEl.textContent = e.message;
+  }
+}
+
+function parseMermaid(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('%%'));
+
+  if (lines.length === 0) throw new Error('Empty input');
+
+  // Parse direction from first line
+  const headerMatch = lines[0].match(/^(graph|flowchart)\s+(TD|TB|LR|RL|BT)\s*$/i);
+  if (!headerMatch) throw new Error('First line must be: graph TD, graph LR, graph BT, or graph RL');
+  const direction = headerMatch[2].toUpperCase().replace('TB', 'TD');
+
+  const nodeMap = {};  // id -> { id, label, shape }
+  const edgeList = []; // { from, to, label }
+
+  function parseNodeDef(raw) {
+    raw = raw.trim();
+    // Match id + optional shape/label: A[label], A([label]), A{label}, A[(label)], A[/label/]
+    let match;
+
+    // Already registered bare ID
+    if (/^[A-Za-z_][\w]*$/.test(raw)) {
+      if (!nodeMap[raw]) nodeMap[raw] = { id: raw, label: raw, shape: 'rectangle' };
+      return raw;
+    }
+
+    // Cylinder: A[(label)]
+    match = raw.match(/^([A-Za-z_][\w]*)\[\((.+?)\)\]$/);
+    if (match) { nodeMap[match[1]] = { id: match[1], label: match[2], shape: 'cylinder' }; return match[1]; }
+
+    // Rounded: A([label])
+    match = raw.match(/^([A-Za-z_][\w]*)\(\[(.+?)\]\)$/);
+    if (match) { nodeMap[match[1]] = { id: match[1], label: match[2], shape: 'rounded' }; return match[1]; }
+
+    // Rounded alt: A(label)
+    match = raw.match(/^([A-Za-z_][\w]*)\((.+?)\)$/);
+    if (match) { nodeMap[match[1]] = { id: match[1], label: match[2], shape: 'rounded' }; return match[1]; }
+
+    // Diamond: A{label}
+    match = raw.match(/^([A-Za-z_][\w]*)\{(.+?)\}$/);
+    if (match) { nodeMap[match[1]] = { id: match[1], label: match[2], shape: 'diamond' }; return match[1]; }
+
+    // Parallelogram: A[/label/]
+    match = raw.match(/^([A-Za-z_][\w]*)\[\/(.+?)\/\]$/);
+    if (match) { nodeMap[match[1]] = { id: match[1], label: match[2], shape: 'parallelogram' }; return match[1]; }
+
+    // Rectangle: A[label]
+    match = raw.match(/^([A-Za-z_][\w]*)\[(.+?)\]$/);
+    if (match) { nodeMap[match[1]] = { id: match[1], label: match[2], shape: 'rectangle' }; return match[1]; }
+
+    // Bare ID
+    match = raw.match(/^([A-Za-z_][\w]*)$/);
+    if (match) {
+      if (!nodeMap[match[1]]) nodeMap[match[1]] = { id: match[1], label: match[1], shape: 'rectangle' };
+      return match[1];
+    }
+
+    throw new Error(`Cannot parse node: "${raw}"`);
+  }
+
+  // Process edge lines
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].replace(/;$/, '').trim();
+    if (!line) continue;
+
+    // Handle subgraph/end — skip for now
+    if (/^subgraph\b/i.test(line) || /^end$/i.test(line)) continue;
+    // Handle style/class directives — skip
+    if (/^(style|class|classDef|linkStyle)\b/i.test(line)) continue;
+
+    // Split by arrow patterns, handling chained edges: A --> B --> C
+    // Arrow patterns: -->, --->, -.->, -.-, ==>, -- text -->, -->|text|
+    const arrowPattern = /\s*(-->|---+>|==+>|-\.->|-\.-|---+)\s*/;
+    const labeledArrow = /\s*-->?\|([^|]*)\|\s*/;
+
+    // Try to parse as chain of edges
+    let remaining = line;
+    let prevNodeId = null;
+
+    while (remaining.length > 0) {
+      remaining = remaining.trim();
+      if (!remaining) break;
+
+      // Try labeled arrow first: -->|label|
+      let arrowMatch = remaining.match(/^([\s\S]*?)-->?\|([^|]*)\|([\s\S]*)$/);
+      if (arrowMatch && arrowMatch[1].trim()) {
+        const fromRaw = arrowMatch[1].trim();
+        const edgeLabel = arrowMatch[2].trim();
+        remaining = arrowMatch[3].trim();
+
+        const fromId = prevNodeId || parseNodeDef(fromRaw);
+
+        // Next token is the target node (up to next arrow or end)
+        const nextArrow = remaining.search(/\s*-->|---+>|==+>|-\.->|-\.-|---+/);
+        let toRaw;
+        if (nextArrow > 0) {
+          toRaw = remaining.substring(0, nextArrow).trim();
+          remaining = remaining.substring(nextArrow);
+        } else {
+          toRaw = remaining;
+          remaining = '';
+        }
+        const toId = parseNodeDef(toRaw);
+        edgeList.push({ from: fromId, to: toId, label: edgeLabel });
+        prevNodeId = toId;
+        continue;
+      }
+
+      // Try plain arrow: -->
+      arrowMatch = remaining.match(/^([\s\S]*?)(-->|---+>|==+>|-\.->)\s*([\s\S]*)$/);
+      if (arrowMatch && arrowMatch[1].trim()) {
+        const fromRaw = arrowMatch[1].trim();
+        remaining = arrowMatch[3].trim();
+
+        const fromId = prevNodeId || parseNodeDef(fromRaw);
+
+        const nextArrow = remaining.search(/\s*-->|---+>|==+>|-\.->|-\.-|---+/);
+        let toRaw;
+        if (nextArrow > 0) {
+          toRaw = remaining.substring(0, nextArrow).trim();
+          remaining = remaining.substring(nextArrow);
+        } else {
+          toRaw = remaining;
+          remaining = '';
+        }
+        const toId = parseNodeDef(toRaw);
+        edgeList.push({ from: fromId, to: toId, label: '' });
+        prevNodeId = toId;
+        continue;
+      }
+
+      // No arrow found — might be a standalone node definition
+      if (!prevNodeId) {
+        parseNodeDef(remaining);
+      }
+      break;
+    }
+  }
+
+  if (Object.keys(nodeMap).length === 0) throw new Error('No nodes found');
+
+  return {
+    nodes: Object.values(nodeMap),
+    edges: edgeList,
+    direction,
+  };
+}
+
+function layoutAndCreate(mNodes, mEdges, direction) {
+  const isVertical = (direction === 'TD' || direction === 'BT');
+  const isReversed = (direction === 'BT' || direction === 'RL');
+
+  // Build adjacency for topological layering
+  const children = {};
+  const parents = {};
+  mNodes.forEach(n => { children[n.id] = []; parents[n.id] = []; });
+  mEdges.forEach(e => {
+    if (children[e.from]) children[e.from].push(e.to);
+    if (parents[e.to]) parents[e.to].push(e.from);
+  });
+
+  // Assign layers via longest-path from roots
+  const layers = {};
+  const visited = new Set();
+
+  function assignLayer(nodeId, depth) {
+    if (layers[nodeId] !== undefined && layers[nodeId] >= depth) return;
+    layers[nodeId] = depth;
+    (children[nodeId] || []).forEach(cid => assignLayer(cid, depth + 1));
+  }
+
+  // Find roots (no parents)
+  const roots = mNodes.filter(n => parents[n.id].length === 0).map(n => n.id);
+  if (roots.length === 0) roots.push(mNodes[0].id);
+  roots.forEach(r => assignLayer(r, 0));
+
+  // Assign remaining (disconnected) nodes
+  mNodes.forEach(n => {
+    if (layers[n.id] === undefined) layers[n.id] = 0;
+  });
+
+  // Group by layer
+  const layerGroups = {};
+  mNodes.forEach(n => {
+    const l = layers[n.id];
+    if (!layerGroups[l]) layerGroups[l] = [];
+    layerGroups[l].push(n);
+  });
+
+  const sortedLayers = Object.keys(layerGroups).map(Number).sort((a, b) => a - b);
+  if (isReversed) sortedLayers.reverse();
+
+  // Layout constants
+  const nodeW = 140;
+  const nodeH = 80;
+  const gapX = isVertical ? 180 : 220;
+  const gapY = isVertical ? 140 : 120;
+  const startX = 80;
+  const startY = 80;
+
+  // Position nodes
+  const posMap = {};
+  sortedLayers.forEach((layerIdx, li) => {
+    const group = layerGroups[layerIdx];
+    group.forEach((n, ni) => {
+      let x, y;
+      if (isVertical) {
+        x = startX + ni * gapX;
+        y = startY + li * gapY;
+      } else {
+        x = startX + li * gapX;
+        y = startY + ni * gapY;
+      }
+      posMap[n.id] = { x: snap(x), y: snap(y) };
+    });
+  });
+
+  // Create diagram nodes
+  const idMap = {};
+  mNodes.forEach(n => {
+    const pos = posMap[n.id];
+    const created = createNode(n.shape, pos.x, pos.y, n.label);
+    idMap[n.id] = created.id;
+  });
+
+  // Create edges after nodes render
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      mEdges.forEach(e => {
+        const fromDiagId = idMap[e.from];
+        const toDiagId = idMap[e.to];
+        if (!fromDiagId || !toDiagId) return;
+
+        // Pick ports based on direction
+        let fromPort, toPort;
+        const fromLayer = layers[e.from];
+        const toLayer = layers[e.to];
+
+        if (isVertical) {
+          if (fromLayer <= toLayer) {
+            fromPort = isReversed ? 'top' : 'bottom';
+            toPort = isReversed ? 'bottom' : 'top';
+          } else {
+            fromPort = isReversed ? 'bottom' : 'top';
+            toPort = isReversed ? 'top' : 'bottom';
+          }
+        } else {
+          if (fromLayer <= toLayer) {
+            fromPort = isReversed ? 'left' : 'right';
+            toPort = isReversed ? 'right' : 'left';
+          } else {
+            fromPort = isReversed ? 'right' : 'left';
+            toPort = isReversed ? 'left' : 'right';
+          }
+        }
+
+        createEdge(fromDiagId, fromPort, toDiagId, toPort, e.label);
+      });
+    });
+  });
 }
 
 // ---- Initialize ----
