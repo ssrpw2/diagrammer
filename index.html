@@ -521,20 +521,7 @@ body {
 
   <div id="canvas-container">
     <svg id="canvas-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;">
-      <defs>
-        <marker id="arrowhead" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto">
-          <polygon points="0 0, 12 4, 0 8" fill="#7f8fa6"/>
-        </marker>
-        <marker id="arrowhead-selected" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto">
-          <polygon points="0 0, 12 4, 0 8" fill="#e94560"/>
-        </marker>
-        <marker id="arrowhead-start" markerWidth="12" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse">
-          <polygon points="12 0, 0 4, 12 8" fill="#7f8fa6"/>
-        </marker>
-        <marker id="arrowhead-start-selected" markerWidth="12" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse">
-          <polygon points="12 0, 0 4, 12 8" fill="#e94560"/>
-        </marker>
-      </defs>
+      <defs id="svg-defs"></defs>
     </svg>
     <div id="canvas"></div>
     <div id="selection-box"></div>
@@ -556,6 +543,54 @@ const contextMenu = document.getElementById('context-menu');
 let nodes = [];
 let edges = [];
 let nextId = 1;
+
+const WEIGHTS = [1, 2, 3, 5];
+
+function ensureArrowMarkers() {
+  const defs = document.getElementById('svg-defs');
+  WEIGHTS.forEach(w => {
+    const scale = 0.6 + w * 0.4;
+    const mw = Math.round(12 * scale);
+    const mh = Math.round(8 * scale);
+    const hy = mh / 2;
+
+    [['', '#7f8fa6'], ['-selected', '#e94560']].forEach(([suffix, color]) => {
+      // End marker
+      let id = `arrowhead-w${w}${suffix}`;
+      if (!document.getElementById(id)) {
+        const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        m.id = id;
+        m.setAttribute('markerWidth', mw);
+        m.setAttribute('markerHeight', mh);
+        m.setAttribute('refX', mw - 1);
+        m.setAttribute('refY', hy);
+        m.setAttribute('orient', 'auto');
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        p.setAttribute('points', `0 0, ${mw} ${hy}, 0 ${mh}`);
+        p.setAttribute('fill', color);
+        m.appendChild(p);
+        defs.appendChild(m);
+      }
+      // Start marker
+      id = `arrowhead-start-w${w}${suffix}`;
+      if (!document.getElementById(id)) {
+        const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        m.id = id;
+        m.setAttribute('markerWidth', mw);
+        m.setAttribute('markerHeight', mh);
+        m.setAttribute('refX', 1);
+        m.setAttribute('refY', hy);
+        m.setAttribute('orient', 'auto-start-reverse');
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        p.setAttribute('points', `${mw} 0, 0 ${hy}, ${mw} ${mh}`);
+        p.setAttribute('fill', color);
+        m.appendChild(p);
+        defs.appendChild(m);
+      }
+    });
+  });
+}
+ensureArrowMarkers();
 let selectedNodes = new Set();
 let selectedEdges = new Set();
 let mode = 'select'; // 'select' | 'connect'
@@ -716,7 +751,7 @@ function getPortPosition(node, port) {
 
 function createEdge(fromId, fromPort, toId, toPort, label, arrowType) {
   const id = 'edge-' + nextId++;
-  const edge = { id, fromId, fromPort, toId, toPort, label: label || '', arrowType: arrowType || 'forward' };
+  const edge = { id, fromId, fromPort, toId, toPort, label: label || '', arrowType: arrowType || 'forward', weight: 2 };
   edges.push(edge);
   renderEdge(edge);
   return edge;
@@ -784,7 +819,6 @@ function renderEdge(edge) {
     pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     pathEl.dataset.edgeId = edge.id;
     pathEl.setAttribute('fill', 'none');
-    pathEl.setAttribute('stroke-width', '2');
     pathEl.style.cursor = 'pointer';
     pathEl.style.pointerEvents = 'stroke';
     svgLayer.appendChild(pathEl);
@@ -819,15 +853,18 @@ function renderEdge(edge) {
   pathEl.setAttribute('d', d);
 
   const isSelected = selectedEdges.has(edge.id);
+  const w = edge.weight || 2;
+  const sel = isSelected ? '-selected' : '';
   pathEl.setAttribute('stroke', isSelected ? '#e94560' : '#7f8fa6');
+  pathEl.setAttribute('stroke-width', w);
 
   const at = edge.arrowType || 'forward';
   if (at === 'forward') {
-    pathEl.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
+    pathEl.setAttribute('marker-end', `url(#arrowhead-w${w}${sel})`);
     pathEl.removeAttribute('marker-start');
   } else if (at === 'both') {
-    pathEl.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
-    pathEl.setAttribute('marker-start', isSelected ? 'url(#arrowhead-start-selected)' : 'url(#arrowhead-start)');
+    pathEl.setAttribute('marker-end', `url(#arrowhead-w${w}${sel})`);
+    pathEl.setAttribute('marker-start', `url(#arrowhead-start-w${w}${sel})`);
   } else {
     pathEl.removeAttribute('marker-end');
     pathEl.removeAttribute('marker-start');
@@ -1076,6 +1113,11 @@ function showContextMenu(x, y, hasNode) {
     items += `<div class="menu-item" data-action="arrow-forward">Arrow: one way (→)</div>`;
     items += `<div class="menu-item" data-action="arrow-both">Arrow: both ways (↔)</div>`;
     items += `<div class="menu-item" data-action="arrow-none">Arrow: none (—)</div>`;
+    items += `<div class="menu-divider"></div>`;
+    items += `<div class="menu-item" data-action="weight-1">Weight: thin</div>`;
+    items += `<div class="menu-item" data-action="weight-2">Weight: normal</div>`;
+    items += `<div class="menu-item" data-action="weight-3">Weight: bold</div>`;
+    items += `<div class="menu-item" data-action="weight-5">Weight: heavy</div>`;
   }
   items += `<div class="menu-item" data-action="select-all">Select all<span class="shortcut">Ctrl+A</span></div>`;
 
@@ -1110,7 +1152,7 @@ function handleMenuAction(action) {
       break;
     case 'arrow-forward':
     case 'arrow-both':
-    case 'arrow-none':
+    case 'arrow-none': {
       const at = action.replace('arrow-', '');
       selectedEdges.forEach(eid => {
         const edge = edges.find(e => e.id === eid);
@@ -1118,6 +1160,19 @@ function handleMenuAction(action) {
       });
       updateEdges();
       break;
+    }
+    case 'weight-1':
+    case 'weight-2':
+    case 'weight-3':
+    case 'weight-5': {
+      const wt = parseInt(action.replace('weight-', ''));
+      selectedEdges.forEach(eid => {
+        const edge = edges.find(e => e.id === eid);
+        if (edge) edge.weight = wt;
+      });
+      updateEdges();
+      break;
+    }
   }
 }
 
@@ -1329,35 +1384,36 @@ async function exportPNG() {
     ctx.beginPath();
     ctx.moveTo(pts[0][0], pts[0][1]);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    const ew = edge.weight || 2;
     ctx.strokeStyle = '#7f8fa6';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = ew;
     ctx.stroke();
 
     const at = edge.arrowType || 'forward';
+    const arrowScale = 0.6 + ew * 0.4;
+    const arrowLen = 12 * arrowScale;
 
-    // Draw arrowhead at end
     if (at === 'forward' || at === 'both') {
       const last = pts[pts.length - 1];
       const prev = pts[pts.length - 2];
       const angle = Math.atan2(last[1] - prev[1], last[0] - prev[0]);
       ctx.beginPath();
       ctx.moveTo(last[0], last[1]);
-      ctx.lineTo(last[0] - 12 * Math.cos(angle - 0.35), last[1] - 12 * Math.sin(angle - 0.35));
-      ctx.lineTo(last[0] - 12 * Math.cos(angle + 0.35), last[1] - 12 * Math.sin(angle + 0.35));
+      ctx.lineTo(last[0] - arrowLen * Math.cos(angle - 0.35), last[1] - arrowLen * Math.sin(angle - 0.35));
+      ctx.lineTo(last[0] - arrowLen * Math.cos(angle + 0.35), last[1] - arrowLen * Math.sin(angle + 0.35));
       ctx.closePath();
       ctx.fillStyle = '#7f8fa6';
       ctx.fill();
     }
 
-    // Draw arrowhead at start (for bidirectional)
     if (at === 'both') {
       const first = pts[0];
       const next = pts[1];
       const angle = Math.atan2(first[1] - next[1], first[0] - next[0]);
       ctx.beginPath();
       ctx.moveTo(first[0], first[1]);
-      ctx.lineTo(first[0] - 12 * Math.cos(angle - 0.35), first[1] - 12 * Math.sin(angle - 0.35));
-      ctx.lineTo(first[0] - 12 * Math.cos(angle + 0.35), first[1] - 12 * Math.sin(angle + 0.35));
+      ctx.lineTo(first[0] - arrowLen * Math.cos(angle - 0.35), first[1] - arrowLen * Math.sin(angle - 0.35));
+      ctx.lineTo(first[0] - arrowLen * Math.cos(angle + 0.35), first[1] - arrowLen * Math.sin(angle + 0.35));
       ctx.closePath();
       ctx.fillStyle = '#7f8fa6';
       ctx.fill();
