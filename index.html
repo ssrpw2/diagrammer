@@ -522,11 +522,17 @@ body {
   <div id="canvas-container">
     <svg id="canvas-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;">
       <defs>
-        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-          <polygon points="0 0, 10 3.5, 0 7" fill="#7f8fa6"/>
+        <marker id="arrowhead" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto">
+          <polygon points="0 0, 12 4, 0 8" fill="#7f8fa6"/>
         </marker>
-        <marker id="arrowhead-selected" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-          <polygon points="0 0, 10 3.5, 0 7" fill="#e94560"/>
+        <marker id="arrowhead-selected" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto">
+          <polygon points="0 0, 12 4, 0 8" fill="#e94560"/>
+        </marker>
+        <marker id="arrowhead-start" markerWidth="12" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse">
+          <polygon points="12 0, 0 4, 12 8" fill="#7f8fa6"/>
+        </marker>
+        <marker id="arrowhead-start-selected" markerWidth="12" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse">
+          <polygon points="12 0, 0 4, 12 8" fill="#e94560"/>
         </marker>
       </defs>
     </svg>
@@ -708,12 +714,61 @@ function getPortPosition(node, port) {
 
 // ---- Edge management ----
 
-function createEdge(fromId, fromPort, toId, toPort, label) {
+function createEdge(fromId, fromPort, toId, toPort, label, arrowType) {
   const id = 'edge-' + nextId++;
-  const edge = { id, fromId, fromPort, toId, toPort, label: label || '' };
+  const edge = { id, fromId, fromPort, toId, toPort, label: label || '', arrowType: arrowType || 'forward' };
   edges.push(edge);
   renderEdge(edge);
   return edge;
+}
+
+function portAxis(port) {
+  return (port === 'top' || port === 'bottom') ? 'vertical' : 'horizontal';
+}
+
+function portDirection(port) {
+  return { top: { x: 0, y: -1 }, bottom: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }[port];
+}
+
+function buildEdgePath(from, to, fromPort, toPort) {
+  const fromAxis = portAxis(fromPort);
+  const toAxis = portAxis(toPort);
+  const offset = 14;
+
+  // Pull start/end away from node so arrowheads don't clip
+  const fd = portDirection(fromPort);
+  const td = portDirection(toPort);
+  const fx = from.x + fd.x * offset;
+  const fy = from.y + fd.y * offset;
+  const tx = to.x + td.x * offset;
+  const ty = to.y + td.y * offset;
+
+  // Aligned ports (top→bottom, left→right) — straight line
+  if (fromAxis === toAxis) {
+    if (fromAxis === 'vertical' && Math.abs(fx - tx) < 2) {
+      return `M ${fx} ${fy} L ${tx} ${ty}`;
+    }
+    if (fromAxis === 'horizontal' && Math.abs(fy - ty) < 2) {
+      return `M ${fx} ${fy} L ${tx} ${ty}`;
+    }
+    // Same axis but offset — use two right-angle bends
+    const midMain = fromAxis === 'vertical'
+      ? (fy + ty) / 2
+      : (fx + tx) / 2;
+
+    if (fromAxis === 'vertical') {
+      return `M ${fx} ${fy} L ${fx} ${midMain} L ${tx} ${midMain} L ${tx} ${ty}`;
+    } else {
+      return `M ${fx} ${fy} L ${midMain} ${fy} L ${midMain} ${ty} L ${tx} ${ty}`;
+    }
+  }
+
+  // Perpendicular ports — one right-angle bend
+  if (fromAxis === 'vertical') {
+    return `M ${fx} ${fy} L ${fx} ${ty} L ${tx} ${ty}`;
+  } else {
+    return `M ${fx} ${fy} L ${tx} ${fy} L ${tx} ${ty}`;
+  }
 }
 
 function renderEdge(edge) {
@@ -730,19 +785,16 @@ function renderEdge(edge) {
     pathEl.dataset.edgeId = edge.id;
     pathEl.setAttribute('fill', 'none');
     pathEl.setAttribute('stroke-width', '2');
-    pathEl.setAttribute('marker-end', 'url(#arrowhead)');
     pathEl.style.cursor = 'pointer';
     pathEl.style.pointerEvents = 'stroke';
     svgLayer.appendChild(pathEl);
 
-    // Click to select edge
     pathEl.addEventListener('click', (e) => {
       e.stopPropagation();
       if (!e.shiftKey) clearSelection();
       selectEdge(edge.id);
     });
 
-    // Double-click to edit label
     pathEl.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       const label = prompt('Edge label:', edge.label);
@@ -751,21 +803,35 @@ function renderEdge(edge) {
         updateEdges();
       }
     });
+
+    // Right-click to cycle arrow type
+    pathEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const types = ['forward', 'both', 'none'];
+      const idx = types.indexOf(edge.arrowType || 'forward');
+      edge.arrowType = types[(idx + 1) % types.length];
+      updateEdges();
+    });
   }
 
-  // Curved path
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const cx1 = from.x + dx * 0.5;
-  const cy1 = from.y;
-  const cx2 = to.x - dx * 0.5;
-  const cy2 = to.y;
-  const d = `M ${from.x} ${from.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${to.x} ${to.y}`;
+  const d = buildEdgePath(from, to, edge.fromPort, edge.toPort);
   pathEl.setAttribute('d', d);
 
   const isSelected = selectedEdges.has(edge.id);
   pathEl.setAttribute('stroke', isSelected ? '#e94560' : '#7f8fa6');
-  pathEl.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
+
+  const at = edge.arrowType || 'forward';
+  if (at === 'forward') {
+    pathEl.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
+    pathEl.removeAttribute('marker-start');
+  } else if (at === 'both') {
+    pathEl.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
+    pathEl.setAttribute('marker-start', isSelected ? 'url(#arrowhead-start-selected)' : 'url(#arrowhead-start)');
+  } else {
+    pathEl.removeAttribute('marker-end');
+    pathEl.removeAttribute('marker-start');
+  }
 
   // Edge label
   let labelEl = document.querySelector(`[data-edge-label="${edge.id}"]`);
@@ -1005,6 +1071,12 @@ function showContextMenu(x, y, hasNode) {
     items += `<div class="menu-divider"></div>`;
     items += `<div class="menu-item" data-action="edit">Edit label<span class="shortcut">Dbl-click</span></div>`;
   }
+  if (selectedEdges.size > 0) {
+    items += `<div class="menu-divider"></div>`;
+    items += `<div class="menu-item" data-action="arrow-forward">Arrow: one way (→)</div>`;
+    items += `<div class="menu-item" data-action="arrow-both">Arrow: both ways (↔)</div>`;
+    items += `<div class="menu-item" data-action="arrow-none">Arrow: none (—)</div>`;
+  }
   items += `<div class="menu-item" data-action="select-all">Select all<span class="shortcut">Ctrl+A</span></div>`;
 
   contextMenu.innerHTML = items;
@@ -1035,6 +1107,16 @@ function handleMenuAction(action) {
         const el = document.getElementById(nid);
         if (el) el.querySelector('.node-body').dispatchEvent(new MouseEvent('dblclick'));
       }
+      break;
+    case 'arrow-forward':
+    case 'arrow-both':
+    case 'arrow-none':
+      const at = action.replace('arrow-', '');
+      selectedEdges.forEach(eid => {
+        const edge = edges.find(e => e.id === eid);
+        if (edge) edge.arrowType = at;
+      });
+      updateEdges();
       break;
   }
 }
@@ -1208,23 +1290,78 @@ async function exportPNG() {
 
     ctx.save();
     ctx.translate(-minX + padding, -minY + padding);
+
+    // Parse the SVG path and draw it on canvas
+    const offset = 14;
+    const fd = portDirection(edge.fromPort);
+    const td = portDirection(edge.toPort);
+    const fx = from.x + fd.x * offset;
+    const fy = from.y + fd.y * offset;
+    const tx = to.x + td.x * offset;
+    const ty = to.y + td.y * offset;
+
+    const fromAx = portAxis(edge.fromPort);
+    const toAx = portAxis(edge.toPort);
+
+    // Build points array for the path
+    const pts = [[fx, fy]];
+    if (fromAx === toAx) {
+      if ((fromAx === 'vertical' && Math.abs(fx - tx) < 2) ||
+          (fromAx === 'horizontal' && Math.abs(fy - ty) < 2)) {
+        // Straight line
+      } else {
+        const mid = fromAx === 'vertical' ? (fy + ty) / 2 : (fx + tx) / 2;
+        if (fromAx === 'vertical') {
+          pts.push([fx, mid], [tx, mid]);
+        } else {
+          pts.push([mid, fy], [mid, ty]);
+        }
+      }
+    } else {
+      if (fromAx === 'vertical') {
+        pts.push([fx, ty]);
+      } else {
+        pts.push([tx, fy]);
+      }
+    }
+    pts.push([tx, ty]);
+
     ctx.beginPath();
-    const dx = to.x - from.x;
-    ctx.moveTo(from.x, from.y);
-    ctx.bezierCurveTo(from.x + dx * 0.5, from.y, to.x - dx * 0.5, to.y, to.x, to.y);
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
     ctx.strokeStyle = '#7f8fa6';
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Arrowhead
-    const angle = Math.atan2(to.y - (to.y - 1), to.x - (to.x - dx * 0.5));
-    ctx.beginPath();
-    ctx.moveTo(to.x, to.y);
-    ctx.lineTo(to.x - 10 * Math.cos(angle - 0.4), to.y - 10 * Math.sin(angle - 0.4));
-    ctx.lineTo(to.x - 10 * Math.cos(angle + 0.4), to.y - 10 * Math.sin(angle + 0.4));
-    ctx.closePath();
-    ctx.fillStyle = '#7f8fa6';
-    ctx.fill();
+    const at = edge.arrowType || 'forward';
+
+    // Draw arrowhead at end
+    if (at === 'forward' || at === 'both') {
+      const last = pts[pts.length - 1];
+      const prev = pts[pts.length - 2];
+      const angle = Math.atan2(last[1] - prev[1], last[0] - prev[0]);
+      ctx.beginPath();
+      ctx.moveTo(last[0], last[1]);
+      ctx.lineTo(last[0] - 12 * Math.cos(angle - 0.35), last[1] - 12 * Math.sin(angle - 0.35));
+      ctx.lineTo(last[0] - 12 * Math.cos(angle + 0.35), last[1] - 12 * Math.sin(angle + 0.35));
+      ctx.closePath();
+      ctx.fillStyle = '#7f8fa6';
+      ctx.fill();
+    }
+
+    // Draw arrowhead at start (for bidirectional)
+    if (at === 'both') {
+      const first = pts[0];
+      const next = pts[1];
+      const angle = Math.atan2(first[1] - next[1], first[0] - next[0]);
+      ctx.beginPath();
+      ctx.moveTo(first[0], first[1]);
+      ctx.lineTo(first[0] - 12 * Math.cos(angle - 0.35), first[1] - 12 * Math.sin(angle - 0.35));
+      ctx.lineTo(first[0] - 12 * Math.cos(angle + 0.35), first[1] - 12 * Math.sin(angle + 0.35));
+      ctx.closePath();
+      ctx.fillStyle = '#7f8fa6';
+      ctx.fill();
+    }
 
     // Label
     if (edge.label) {
