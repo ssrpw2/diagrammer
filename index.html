@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagrammer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+}
+
+/* ---- Sidebar ---- */
+#sidebar {
+  width: 220px;
+  background: #16213e;
+  border-right: 1px solid #0f3460;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+#sidebar h2 {
+  padding: 16px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #7f8fa6;
+  border-bottom: 1px solid #0f3460;
+}
+
+.shape-palette {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  cursor: grab;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+
+.palette-item:hover {
+  background: #0f3460;
+  border-color: #533483;
+}
+
+.palette-item:active {
+  cursor: grabbing;
+}
+
+.palette-icon {
+  width: 32px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.palette-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.palette-label {
+  font-size: 13px;
+  color: #c8d6e5;
+}
+
+/* ---- Toolbar ---- */
+#toolbar {
+  position: absolute;
+  top: 12px;
+  left: 240px;
+  display: flex;
+  gap: 6px;
+  z-index: 100;
+}
+
+#toolbar button {
+  padding: 6px 14px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #c8d6e5;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#toolbar button:hover {
+  background: #0f3460;
+}
+
+#toolbar button.active {
+  background: #533483;
+  border-color: #533483;
+}
+
+/* ---- Canvas ---- */
+#canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #1a1a2e;
+}
+
+#canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Grid pattern */
+#canvas-container::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ---- Nodes ---- */
+.node {
+  position: absolute;
+  cursor: move;
+  user-select: none;
+  z-index: 10;
+}
+
+.node.selected {
+  z-index: 20;
+}
+
+.node-body {
+  min-width: 120px;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  font-size: 13px;
+  text-align: center;
+  word-break: break-word;
+}
+
+/* Shape styles */
+.node[data-shape="rectangle"] .node-body {
+  background: #16213e;
+  border: 2px solid #533483;
+  border-radius: 6px;
+}
+
+.node[data-shape="rounded"] .node-body {
+  background: #16213e;
+  border: 2px solid #0f3460;
+  border-radius: 20px;
+}
+
+.node[data-shape="diamond"] .node-body {
+  background: #16213e;
+  border: 2px solid #e94560;
+  min-width: 100px;
+  min-height: 100px;
+  transform: rotate(45deg);
+  border-radius: 4px;
+}
+
+.node[data-shape="diamond"] .node-body span {
+  transform: rotate(-45deg);
+  display: block;
+}
+
+.node[data-shape="cylinder"] .node-body {
+  background: #16213e;
+  border: 2px solid #0f3460;
+  border-radius: 50% / 15%;
+  min-height: 70px;
+}
+
+.node[data-shape="parallelogram"] .node-body {
+  background: #16213e;
+  border: 2px solid #7f8fa6;
+  transform: skewX(-10deg);
+  border-radius: 4px;
+}
+
+.node[data-shape="parallelogram"] .node-body span {
+  transform: skewX(10deg);
+  display: block;
+}
+
+.node[data-shape="group"] .node-body {
+  background: rgba(83, 52, 131, 0.1);
+  border: 2px dashed #533483;
+  border-radius: 8px;
+  min-width: 200px;
+  min-height: 150px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #7f8fa6;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.node.selected .node-body {
+  box-shadow: 0 0 0 2px #e94560;
+}
+
+/* ---- Connection ports ---- */
+.port {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #533483;
+  border: 2px solid #1a1a2e;
+  border-radius: 50%;
+  cursor: crosshair;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 30;
+}
+
+.node:hover .port,
+.node.selected .port {
+  opacity: 1;
+}
+
+.port:hover {
+  background: #e94560;
+  transform: scale(1.3);
+}
+
+.port-top    { top: -5px;   left: 50%;  transform: translateX(-50%); }
+.port-bottom { bottom: -5px; left: 50%; transform: translateX(-50%); }
+.port-left   { left: -5px;  top: 50%;   transform: translateY(-50%); }
+.port-right  { right: -5px; top: 50%;   transform: translateY(-50%); }
+
+.node:hover .port-top, .node.selected .port-top { transform: translateX(-50%); }
+.node:hover .port-bottom, .node.selected .port-bottom { transform: translateX(-50%); }
+.node:hover .port-left, .node.selected .port-left { transform: translateY(-50%); }
+.node:hover .port-right, .node.selected .port-right { transform: translateY(-50%); }
+
+.port:hover {
+  transform: scale(1.3) !important;
+}
+
+/* ---- Edge labels ---- */
+.edge-label {
+  position: absolute;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #c8d6e5;
+  cursor: pointer;
+  z-index: 15;
+  white-space: nowrap;
+  pointer-events: all;
+}
+
+/* ---- Text editing ---- */
+.node-body[contenteditable="true"] {
+  outline: none;
+  cursor: text;
+  border-color: #e94560;
+}
+
+/* ---- Temp connection line ---- */
+#temp-line {
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ---- Selection box ---- */
+#selection-box {
+  position: absolute;
+  border: 1px solid #533483;
+  background: rgba(83, 52, 131, 0.15);
+  pointer-events: none;
+  z-index: 50;
+  display: none;
+}
+
+/* ---- Context menu ---- */
+#context-menu {
+  position: absolute;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 160px;
+  z-index: 200;
+  display: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+#context-menu .menu-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#context-menu .menu-item:hover {
+  background: #0f3460;
+}
+
+#context-menu .menu-divider {
+  height: 1px;
+  background: #0f3460;
+  margin: 4px 0;
+}
+
+.menu-item .shortcut {
+  margin-left: auto;
+  font-size: 11px;
+  color: #7f8fa6;
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="sidebar">
+    <h2>Shapes</h2>
+    <div class="shape-palette">
+      <div class="palette-item" draggable="true" data-shape="rectangle">
+        <div class="palette-icon">
+          <svg viewBox="0 0 32 24"><rect x="1" y="1" width="30" height="22" rx="2" fill="none" stroke="#533483" stroke-width="2"/></svg>
+        </div>
+        <span class="palette-label">Process</span>
+      </div>
+      <div class="palette-item" draggable="true" data-shape="rounded">
+        <div class="palette-icon">
+          <svg viewBox="0 0 32 24"><rect x="1" y="1" width="30" height="22" rx="11" fill="none" stroke="#0f3460" stroke-width="2"/></svg>
+        </div>
+        <span class="palette-label">Terminal</span>
+      </div>
+      <div class="palette-item" draggable="true" data-shape="diamond">
+        <div class="palette-icon">
+          <svg viewBox="0 0 32 24"><polygon points="16,1 31,12 16,23 1,12" fill="none" stroke="#e94560" stroke-width="2"/></svg>
+        </div>
+        <span class="palette-label">Decision</span>
+      </div>
+      <div class="palette-item" draggable="true" data-shape="cylinder">
+        <div class="palette-icon">
+          <svg viewBox="0 0 32 28"><ellipse cx="16" cy="6" rx="13" ry="5" fill="none" stroke="#0f3460" stroke-width="2"/><line x1="3" y1="6" x2="3" y2="22" stroke="#0f3460" stroke-width="2"/><line x1="29" y1="6" x2="29" y2="22" stroke="#0f3460" stroke-width="2"/><ellipse cx="16" cy="22" rx="13" ry="5" fill="none" stroke="#0f3460" stroke-width="2"/></svg>
+        </div>
+        <span class="palette-label">Database</span>
+      </div>
+      <div class="palette-item" draggable="true" data-shape="parallelogram">
+        <div class="palette-icon">
+          <svg viewBox="0 0 32 24"><polygon points="6,1 31,1 26,23 1,23" fill="none" stroke="#7f8fa6" stroke-width="2"/></svg>
+        </div>
+        <span class="palette-label">Input/Output</span>
+      </div>
+      <div class="palette-item" draggable="true" data-shape="group">
+        <div class="palette-icon">
+          <svg viewBox="0 0 32 24"><rect x="1" y="1" width="30" height="22" rx="3" fill="none" stroke="#533483" stroke-width="2" stroke-dasharray="4 2"/></svg>
+        </div>
+        <span class="palette-label">Group</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="toolbar">
+    <button id="btn-select" class="active" title="Select (V)">Select</button>
+    <button id="btn-connect" title="Connect (C)">Connect</button>
+    <button id="btn-delete" title="Delete selected (Del)">Delete</button>
+    <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+    <button id="btn-load" title="Load (Ctrl+O)">Load</button>
+    <button id="btn-export" title="Export PNG">Export PNG</button>
+    <button id="btn-clear" title="Clear all">Clear</button>
+  </div>
+
+  <div id="canvas-container">
+    <svg id="canvas-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;">
+      <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" fill="#7f8fa6"/>
+        </marker>
+        <marker id="arrowhead-selected" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" fill="#e94560"/>
+        </marker>
+      </defs>
+    </svg>
+    <div id="canvas"></div>
+    <div id="selection-box"></div>
+    <div id="context-menu"></div>
+    <input type="file" id="file-input" accept=".json" style="display:none">
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  Diagrammer — a local browser-based diagramming tool
+// ============================================================
+
+const canvas = document.getElementById('canvas');
+const canvasContainer = document.getElementById('canvas-container');
+const svgLayer = document.getElementById('canvas-svg');
+const contextMenu = document.getElementById('context-menu');
+
+let nodes = [];
+let edges = [];
+let nextId = 1;
+let selectedNodes = new Set();
+let selectedEdges = new Set();
+let mode = 'select'; // 'select' | 'connect'
+
+// Drag state
+let dragState = null;
+// { type: 'move', nodeId, offsetX, offsetY, startPositions }
+// { type: 'connect', fromId, fromPort, tempLine }
+// { type: 'select-box', startX, startY }
+
+// ---- Node management ----
+
+function createNode(shape, x, y, label) {
+  const id = 'node-' + nextId++;
+  const node = { id, shape, x, y, label: label || getDefaultLabel(shape), width: 0, height: 0 };
+  nodes.push(node);
+  renderNode(node);
+  return node;
+}
+
+function getDefaultLabel(shape) {
+  const labels = {
+    rectangle: 'Process',
+    rounded: 'Start/End',
+    diamond: 'Decision?',
+    cylinder: 'Database',
+    parallelogram: 'I/O',
+    group: 'Group',
+  };
+  return labels[shape] || 'Node';
+}
+
+function renderNode(node) {
+  let el = document.getElementById(node.id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = node.id;
+    el.className = 'node';
+    el.dataset.shape = node.shape;
+    el.innerHTML = `
+      <div class="node-body"><span>${escapeHtml(node.label)}</span></div>
+      <div class="port port-top" data-port="top"></div>
+      <div class="port port-bottom" data-port="bottom"></div>
+      <div class="port port-left" data-port="left"></div>
+      <div class="port port-right" data-port="right"></div>
+    `;
+    canvas.appendChild(el);
+    setupNodeEvents(el, node);
+  }
+  el.style.left = node.x + 'px';
+  el.style.top = node.y + 'px';
+  // Measure after render
+  requestAnimationFrame(() => {
+    node.width = el.offsetWidth;
+    node.height = el.offsetHeight;
+    updateEdges();
+  });
+}
+
+function setupNodeEvents(el, node) {
+  const body = el.querySelector('.node-body');
+
+  // Double-click to edit label
+  body.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    const span = body.querySelector('span');
+    span.contentEditable = true;
+    body.setAttribute('contenteditable', 'true');
+    span.focus();
+    document.execCommand('selectAll');
+
+    const finish = () => {
+      span.contentEditable = false;
+      body.removeAttribute('contenteditable');
+      node.label = span.textContent.trim() || getDefaultLabel(node.shape);
+      span.textContent = node.label;
+    };
+
+    span.addEventListener('blur', finish, { once: true });
+    span.addEventListener('keydown', (ke) => {
+      if (ke.key === 'Enter') { ke.preventDefault(); span.blur(); }
+      if (ke.key === 'Escape') { span.textContent = node.label; span.blur(); }
+    });
+  });
+
+  // Mouse down on node body — start drag or select
+  body.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (body.getAttribute('contenteditable') === 'true') return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (!e.shiftKey && !selectedNodes.has(node.id)) {
+      clearSelection();
+    }
+    selectNode(node.id);
+
+    const startPositions = {};
+    selectedNodes.forEach(nid => {
+      const n = nodes.find(nn => nn.id === nid);
+      if (n) startPositions[nid] = { x: n.x, y: n.y };
+    });
+
+    dragState = {
+      type: 'move',
+      startX: e.clientX,
+      startY: e.clientY,
+      startPositions,
+    };
+  });
+
+  // Port events
+  el.querySelectorAll('.port').forEach(port => {
+    port.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const portName = port.dataset.port;
+      const pos = getPortPosition(node, portName);
+
+      const tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      tempLine.setAttribute('x1', pos.x);
+      tempLine.setAttribute('y1', pos.y);
+      tempLine.setAttribute('x2', pos.x);
+      tempLine.setAttribute('y2', pos.y);
+      tempLine.setAttribute('stroke', '#e94560');
+      tempLine.setAttribute('stroke-width', '2');
+      tempLine.setAttribute('stroke-dasharray', '5 3');
+      tempLine.id = 'temp-line';
+      svgLayer.appendChild(tempLine);
+
+      dragState = {
+        type: 'connect',
+        fromId: node.id,
+        fromPort: portName,
+        tempLine,
+      };
+    });
+  });
+}
+
+// ---- Port positions ----
+
+function getPortPosition(node, port) {
+  const el = document.getElementById(node.id);
+  if (!el) return { x: node.x, y: node.y };
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  switch (port) {
+    case 'top':    return { x: node.x + w/2, y: node.y };
+    case 'bottom': return { x: node.x + w/2, y: node.y + h };
+    case 'left':   return { x: node.x,       y: node.y + h/2 };
+    case 'right':  return { x: node.x + w,   y: node.y + h/2 };
+  }
+  return { x: node.x, y: node.y };
+}
+
+// ---- Edge management ----
+
+function createEdge(fromId, fromPort, toId, toPort, label) {
+  const id = 'edge-' + nextId++;
+  const edge = { id, fromId, fromPort, toId, toPort, label: label || '' };
+  edges.push(edge);
+  renderEdge(edge);
+  return edge;
+}
+
+function renderEdge(edge) {
+  const fromNode = nodes.find(n => n.id === edge.fromId);
+  const toNode = nodes.find(n => n.id === edge.toId);
+  if (!fromNode || !toNode) return;
+
+  const from = getPortPosition(fromNode, edge.fromPort);
+  const to = getPortPosition(toNode, edge.toPort);
+
+  let pathEl = svgLayer.querySelector(`[data-edge-id="${edge.id}"]`);
+  if (!pathEl) {
+    pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.dataset.edgeId = edge.id;
+    pathEl.setAttribute('fill', 'none');
+    pathEl.setAttribute('stroke-width', '2');
+    pathEl.setAttribute('marker-end', 'url(#arrowhead)');
+    pathEl.style.cursor = 'pointer';
+    pathEl.style.pointerEvents = 'stroke';
+    svgLayer.appendChild(pathEl);
+
+    // Click to select edge
+    pathEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!e.shiftKey) clearSelection();
+      selectEdge(edge.id);
+    });
+
+    // Double-click to edit label
+    pathEl.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const label = prompt('Edge label:', edge.label);
+      if (label !== null) {
+        edge.label = label;
+        updateEdges();
+      }
+    });
+  }
+
+  // Curved path
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const cx1 = from.x + dx * 0.5;
+  const cy1 = from.y;
+  const cx2 = to.x - dx * 0.5;
+  const cy2 = to.y;
+  const d = `M ${from.x} ${from.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${to.x} ${to.y}`;
+  pathEl.setAttribute('d', d);
+
+  const isSelected = selectedEdges.has(edge.id);
+  pathEl.setAttribute('stroke', isSelected ? '#e94560' : '#7f8fa6');
+  pathEl.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
+
+  // Edge label
+  let labelEl = document.querySelector(`[data-edge-label="${edge.id}"]`);
+  if (edge.label) {
+    if (!labelEl) {
+      labelEl = document.createElement('div');
+      labelEl.className = 'edge-label';
+      labelEl.dataset.edgeLabel = edge.id;
+      canvasContainer.appendChild(labelEl);
+      labelEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const label = prompt('Edge label:', edge.label);
+        if (label !== null) {
+          edge.label = label;
+          updateEdges();
+        }
+      });
+    }
+    labelEl.textContent = edge.label;
+    const midX = (from.x + to.x) / 2;
+    const midY = (from.y + to.y) / 2;
+    labelEl.style.left = midX + 'px';
+    labelEl.style.top = (midY - 10) + 'px';
+    labelEl.style.transform = 'translate(-50%, -50%)';
+  } else if (labelEl) {
+    labelEl.remove();
+  }
+}
+
+function updateEdges() {
+  edges.forEach(renderEdge);
+}
+
+// ---- Selection ----
+
+function selectNode(id) {
+  selectedNodes.add(id);
+  const el = document.getElementById(id);
+  if (el) el.classList.add('selected');
+}
+
+function deselectNode(id) {
+  selectedNodes.delete(id);
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('selected');
+}
+
+function selectEdge(id) {
+  selectedEdges.add(id);
+  updateEdges();
+}
+
+function clearSelection() {
+  selectedNodes.forEach(id => deselectNode(id));
+  selectedNodes.clear();
+  selectedEdges.clear();
+  updateEdges();
+}
+
+// ---- Deletion ----
+
+function deleteSelected() {
+  // Delete selected edges
+  selectedEdges.forEach(eid => {
+    const pathEl = svgLayer.querySelector(`[data-edge-id="${eid}"]`);
+    if (pathEl) pathEl.remove();
+    const labelEl = document.querySelector(`[data-edge-label="${eid}"]`);
+    if (labelEl) labelEl.remove();
+    edges = edges.filter(e => e.id !== eid);
+  });
+
+  // Delete selected nodes and their edges
+  selectedNodes.forEach(nid => {
+    const el = document.getElementById(nid);
+    if (el) el.remove();
+    nodes = nodes.filter(n => n.id !== nid);
+    // Remove connected edges
+    edges.filter(e => e.fromId === nid || e.toId === nid).forEach(e => {
+      const pathEl = svgLayer.querySelector(`[data-edge-id="${e.id}"]`);
+      if (pathEl) pathEl.remove();
+      const labelEl = document.querySelector(`[data-edge-label="${e.id}"]`);
+      if (labelEl) labelEl.remove();
+    });
+    edges = edges.filter(e => e.fromId !== nid && e.toId !== nid);
+  });
+
+  selectedNodes.clear();
+  selectedEdges.clear();
+}
+
+// ---- Drag from palette ----
+
+document.querySelectorAll('.palette-item').forEach(item => {
+  item.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('shape', item.dataset.shape);
+    e.dataTransfer.effectAllowed = 'copy';
+  });
+});
+
+canvasContainer.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+canvasContainer.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const shape = e.dataTransfer.getData('shape');
+  if (!shape) return;
+  const rect = canvasContainer.getBoundingClientRect();
+  const x = e.clientX - rect.left - 60;
+  const y = e.clientY - rect.top - 30;
+  createNode(shape, snap(x), snap(y));
+});
+
+// ---- Snap to grid ----
+
+function snap(v) {
+  return Math.round(v / 20) * 20;
+}
+
+// ---- Global mouse events ----
+
+canvasContainer.addEventListener('mousedown', (e) => {
+  if (e.target === canvasContainer || e.target === canvas || e.target.id === 'canvas-svg') {
+    if (e.button === 0) {
+      clearSelection();
+      // Start selection box
+      const rect = canvasContainer.getBoundingClientRect();
+      dragState = {
+        type: 'select-box',
+        startX: e.clientX - rect.left,
+        startY: e.clientY - rect.top,
+      };
+    }
+  }
+  hideContextMenu();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!dragState) return;
+
+  if (dragState.type === 'move') {
+    const dx = e.clientX - dragState.startX;
+    const dy = e.clientY - dragState.startY;
+    selectedNodes.forEach(nid => {
+      const node = nodes.find(n => n.id === nid);
+      const start = dragState.startPositions[nid];
+      if (node && start) {
+        node.x = snap(start.x + dx);
+        node.y = snap(start.y + dy);
+        renderNode(node);
+      }
+    });
+    updateEdges();
+  }
+
+  if (dragState.type === 'connect') {
+    const rect = canvasContainer.getBoundingClientRect();
+    dragState.tempLine.setAttribute('x2', e.clientX - rect.left);
+    dragState.tempLine.setAttribute('y2', e.clientY - rect.top);
+  }
+
+  if (dragState.type === 'select-box') {
+    const rect = canvasContainer.getBoundingClientRect();
+    const curX = e.clientX - rect.left;
+    const curY = e.clientY - rect.top;
+    const box = document.getElementById('selection-box');
+    box.style.display = 'block';
+    box.style.left = Math.min(dragState.startX, curX) + 'px';
+    box.style.top = Math.min(dragState.startY, curY) + 'px';
+    box.style.width = Math.abs(curX - dragState.startX) + 'px';
+    box.style.height = Math.abs(curY - dragState.startY) + 'px';
+  }
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (!dragState) return;
+
+  if (dragState.type === 'connect') {
+    dragState.tempLine.remove();
+    // Find target port
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    if (target && target.classList.contains('port')) {
+      const targetNode = target.closest('.node');
+      if (targetNode && targetNode.id !== dragState.fromId) {
+        createEdge(dragState.fromId, dragState.fromPort, targetNode.id, target.dataset.port);
+      }
+    }
+  }
+
+  if (dragState.type === 'select-box') {
+    const box = document.getElementById('selection-box');
+    const bx = parseFloat(box.style.left);
+    const by = parseFloat(box.style.top);
+    const bw = parseFloat(box.style.width);
+    const bh = parseFloat(box.style.height);
+    box.style.display = 'none';
+
+    if (bw > 5 || bh > 5) {
+      nodes.forEach(node => {
+        const el = document.getElementById(node.id);
+        if (!el) return;
+        const nx = node.x;
+        const ny = node.y;
+        const nw = el.offsetWidth;
+        const nh = el.offsetHeight;
+        if (nx + nw > bx && nx < bx + bw && ny + nh > by && ny < by + bh) {
+          selectNode(node.id);
+        }
+      });
+    }
+  }
+
+  dragState = null;
+});
+
+// ---- Context menu ----
+
+canvasContainer.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const target = e.target.closest('.node');
+  if (target) {
+    const node = nodes.find(n => n.id === target.id);
+    if (node && !selectedNodes.has(node.id)) {
+      clearSelection();
+      selectNode(node.id);
+    }
+  }
+  showContextMenu(e.clientX, e.clientY, !!target);
+});
+
+function showContextMenu(x, y, hasNode) {
+  let items = '';
+  if (hasNode || selectedNodes.size > 0) {
+    items += `<div class="menu-item" data-action="delete">Delete<span class="shortcut">Del</span></div>`;
+    items += `<div class="menu-item" data-action="duplicate">Duplicate<span class="shortcut">Ctrl+D</span></div>`;
+    items += `<div class="menu-divider"></div>`;
+    items += `<div class="menu-item" data-action="edit">Edit label<span class="shortcut">Dbl-click</span></div>`;
+  }
+  items += `<div class="menu-item" data-action="select-all">Select all<span class="shortcut">Ctrl+A</span></div>`;
+
+  contextMenu.innerHTML = items;
+  contextMenu.style.left = x + 'px';
+  contextMenu.style.top = y + 'px';
+  contextMenu.style.display = 'block';
+
+  contextMenu.querySelectorAll('.menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      handleMenuAction(item.dataset.action);
+      hideContextMenu();
+    });
+  });
+}
+
+function hideContextMenu() {
+  contextMenu.style.display = 'none';
+}
+
+function handleMenuAction(action) {
+  switch (action) {
+    case 'delete': deleteSelected(); break;
+    case 'duplicate': duplicateSelected(); break;
+    case 'select-all': nodes.forEach(n => selectNode(n.id)); break;
+    case 'edit':
+      if (selectedNodes.size === 1) {
+        const nid = [...selectedNodes][0];
+        const el = document.getElementById(nid);
+        if (el) el.querySelector('.node-body').dispatchEvent(new MouseEvent('dblclick'));
+      }
+      break;
+  }
+}
+
+function duplicateSelected() {
+  const newIds = {};
+  selectedNodes.forEach(nid => {
+    const orig = nodes.find(n => n.id === nid);
+    if (orig) {
+      const newNode = createNode(orig.shape, orig.x + 40, orig.y + 40, orig.label);
+      newIds[nid] = newNode.id;
+    }
+  });
+  // Duplicate edges between selected nodes
+  edges.forEach(e => {
+    if (newIds[e.fromId] && newIds[e.toId]) {
+      createEdge(newIds[e.fromId], e.fromPort, newIds[e.toId], e.toPort, e.label);
+    }
+  });
+  clearSelection();
+  Object.values(newIds).forEach(id => selectNode(id));
+}
+
+// ---- Keyboard shortcuts ----
+
+document.addEventListener('keydown', (e) => {
+  // Don't intercept when editing text
+  if (e.target.contentEditable === 'true' || e.target.tagName === 'INPUT') return;
+
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    deleteSelected();
+  }
+  if (e.key === 'Escape') {
+    clearSelection();
+  }
+  if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    nodes.forEach(n => selectNode(n.id));
+  }
+  if (e.key === 'd' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    duplicateSelected();
+  }
+  if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    saveDiagram();
+  }
+  if (e.key === 'o' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    document.getElementById('file-input').click();
+  }
+  if (e.key === 'v') setMode('select');
+  if (e.key === 'c' && !e.ctrlKey && !e.metaKey) setMode('connect');
+});
+
+// ---- Mode switching ----
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-select').classList.toggle('active', m === 'select');
+  document.getElementById('btn-connect').classList.toggle('active', m === 'connect');
+  canvasContainer.style.cursor = m === 'connect' ? 'crosshair' : 'default';
+}
+
+// ---- Toolbar buttons ----
+
+document.getElementById('btn-select').addEventListener('click', () => setMode('select'));
+document.getElementById('btn-connect').addEventListener('click', () => setMode('connect'));
+document.getElementById('btn-delete').addEventListener('click', deleteSelected);
+document.getElementById('btn-save').addEventListener('click', saveDiagram);
+document.getElementById('btn-load').addEventListener('click', () => document.getElementById('file-input').click());
+document.getElementById('btn-export').addEventListener('click', exportPNG);
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (confirm('Clear all nodes and edges?')) {
+    clearAll();
+  }
+});
+
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    loadDiagram(JSON.parse(ev.target.result));
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// ---- Save / Load ----
+
+function saveDiagram() {
+  const data = { nodes, edges, nextId };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'diagram.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function loadDiagram(data) {
+  clearAll();
+  nextId = data.nextId || 1;
+  data.nodes.forEach(n => {
+    nodes.push(n);
+    renderNode(n);
+  });
+  data.edges.forEach(e => {
+    edges.push(e);
+  });
+  requestAnimationFrame(() => updateEdges());
+}
+
+function clearAll() {
+  nodes.forEach(n => {
+    const el = document.getElementById(n.id);
+    if (el) el.remove();
+  });
+  edges.forEach(e => {
+    const pathEl = svgLayer.querySelector(`[data-edge-id="${e.id}"]`);
+    if (pathEl) pathEl.remove();
+    const labelEl = document.querySelector(`[data-edge-label="${e.id}"]`);
+    if (labelEl) labelEl.remove();
+  });
+  nodes = [];
+  edges = [];
+  selectedNodes.clear();
+  selectedEdges.clear();
+}
+
+// ---- Export PNG ----
+
+async function exportPNG() {
+  // Compute bounding box of all nodes
+  if (nodes.length === 0) { alert('Nothing to export.'); return; }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach(n => {
+    const el = document.getElementById(n.id);
+    if (!el) return;
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + el.offsetWidth);
+    maxY = Math.max(maxY, n.y + el.offsetHeight);
+  });
+
+  const padding = 40;
+  const width = maxX - minX + padding * 2;
+  const height = maxY - minY + padding * 2;
+
+  // Create offscreen canvas
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = width * 2;
+  offCanvas.height = height * 2;
+  const ctx = offCanvas.getContext('2d');
+  ctx.scale(2, 2);
+
+  // Background
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, width, height);
+
+  // Draw edges
+  edges.forEach(edge => {
+    const fromNode = nodes.find(n => n.id === edge.fromId);
+    const toNode = nodes.find(n => n.id === edge.toId);
+    if (!fromNode || !toNode) return;
+    const from = getPortPosition(fromNode, edge.fromPort);
+    const to = getPortPosition(toNode, edge.toPort);
+
+    ctx.save();
+    ctx.translate(-minX + padding, -minY + padding);
+    ctx.beginPath();
+    const dx = to.x - from.x;
+    ctx.moveTo(from.x, from.y);
+    ctx.bezierCurveTo(from.x + dx * 0.5, from.y, to.x - dx * 0.5, to.y, to.x, to.y);
+    ctx.strokeStyle = '#7f8fa6';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Arrowhead
+    const angle = Math.atan2(to.y - (to.y - 1), to.x - (to.x - dx * 0.5));
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(to.x - 10 * Math.cos(angle - 0.4), to.y - 10 * Math.sin(angle - 0.4));
+    ctx.lineTo(to.x - 10 * Math.cos(angle + 0.4), to.y - 10 * Math.sin(angle + 0.4));
+    ctx.closePath();
+    ctx.fillStyle = '#7f8fa6';
+    ctx.fill();
+
+    // Label
+    if (edge.label) {
+      const midX = (from.x + to.x) / 2;
+      const midY = (from.y + to.y) / 2;
+      ctx.font = '11px -apple-system, sans-serif';
+      ctx.fillStyle = '#c8d6e5';
+      ctx.textAlign = 'center';
+      ctx.fillText(edge.label, midX, midY - 5);
+    }
+
+    ctx.restore();
+  });
+
+  // Draw nodes
+  nodes.forEach(node => {
+    const el = document.getElementById(node.id);
+    if (!el) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const x = node.x - minX + padding;
+    const y = node.y - minY + padding;
+
+    ctx.save();
+
+    const colors = {
+      rectangle: '#533483',
+      rounded: '#0f3460',
+      diamond: '#e94560',
+      cylinder: '#0f3460',
+      parallelogram: '#7f8fa6',
+      group: '#533483',
+    };
+    const color = colors[node.shape] || '#533483';
+
+    ctx.fillStyle = '#16213e';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+
+    if (node.shape === 'rectangle') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 6);
+      ctx.fill();
+      ctx.stroke();
+    } else if (node.shape === 'rounded') {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 20);
+      ctx.fill();
+      ctx.stroke();
+    } else if (node.shape === 'diamond') {
+      const cx = x + w/2;
+      const cy = y + h/2;
+      const hw = w/2;
+      const hh = h/2;
+      ctx.beginPath();
+      ctx.moveTo(cx, y);
+      ctx.lineTo(x + w, cy);
+      ctx.lineTo(cx, y + h);
+      ctx.lineTo(x, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (node.shape === 'cylinder') {
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + 12, w/2, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillRect(x, y + 12, w, h - 24);
+      ctx.strokeRect(x, y + 12, w, h - 24);
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + h - 12, w/2, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (node.shape === 'group') {
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 8);
+      ctx.fillStyle = 'rgba(83, 52, 131, 0.1)';
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 4);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Label
+    ctx.fillStyle = node.shape === 'group' ? '#7f8fa6' : '#e0e0e0';
+    ctx.font = node.shape === 'group' ? '11px -apple-system, sans-serif' : '13px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(node.label, x + w/2, y + h/2);
+
+    ctx.restore();
+  });
+
+  // Download
+  offCanvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'diagram.png';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+// ---- Utilities ----
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---- Initialize ----
+setMode('select');
+</script>
+
+</body>
+</html>
